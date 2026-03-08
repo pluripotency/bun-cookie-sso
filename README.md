@@ -18,10 +18,10 @@ To run first site:
 bun run index.ts
 ```
 
-To run second site, copy index.ts to index2.ts and set PORT to 3001 then:
+To run second site:
 
 ```bash
-bun run index2.ts
+PORT=3001 bun run index2.ts
 ```
 
 This project was created using `bun init` in bun v1.3.10. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.

@@ -3,7 +3,7 @@ import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Cookieの解析を有効化
 app.use(cookieParser());
