@@ -1,32 +1,27 @@
-import express from 'express';
-import cookieParser from 'cookie-parser';
+import { serve } from "bun";
 import jwt from 'jsonwebtoken';
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Cookieの解析を有効化
-app.use(cookieParser());
-
 // 認証設定
-const SECRET_KEY = process.env.SECRET_KEY;
+const PORT = process.env.PORT || 3000;
+const SECRET_KEY = process.env.SECRET_KEY || 'secret-54321';
 const COOKIE_NAME = 'sso_token';
 const SESSION_DURATION = 24 * 60 * 60 * 1000; // 1日（ミリ秒）
 const DOMAIN = '.localhost'; // 本番では '.yourdomain.com'
 
-// 1. ログイン処理（イントラサイト）
-app.get('/login', (req: any, res: any) => {
-  // ユーザー情報(ペイロード)
-  const payload = {
-    userId: 'user_123',
-    role: 'user'
-  };
+// ユーザー情報(ペイロード)
+const payload = {
+  userId: process.env.USER_ID || 'user-54321',
+  role: 'user'
+};
 
+const login = async (req: Request, next)=>{
+  if (req.cookies.get(COOKIE_NAME)){
+    return new Response('すでにログインしています。');
+  }
   // 署名付きトークンの生成（24時間有効）
   const token = jwt.sign(payload, SECRET_KEY, {expiresIn: '24h'});
-
   // 本来はここでID/PW検証
-  res.cookie(COOKIE_NAME, token, {
+  req.cookies.set(COOKIE_NAME, token, {
     domain: DOMAIN,
     path: '/',
     maxAge: SESSION_DURATION,
@@ -34,38 +29,59 @@ app.get('/login', (req: any, res: any) => {
     secure: false,  // ローカル開発(http)なのでfalse。本番はtrue。
     sameSite: 'lax'
   });
-  
-  res.send('ログイン完了！1日間有効なTokenをCookieに保存しました。');
-});
+  return next(true);
+};
 
-const authenticate = (req: any, res: any, next:any)=> {
-  const token = req.cookies[COOKIE_NAME];
+const authenticate = async (req: Request, next)=>{
+  const token = req.cookies.get(COOKIE_NAME);
   if (!token) {
-    return res.status(401).send('未認証です。ログインしてください。');
+    return new Response('未認証です。ログインしてください。', {status: 401});
   }
   try {
     // 署名の検証（改ざんされていたらここでエラーになる）
     const decoded = jwt.verify(token, SECRET_KEY, {algorithms: ['HS256']});
-    req.user = decoded; // 後続の処理でユーザー情報を使えるようにする
-    next();
+    return next(decoded);
   } catch {
-    res.clearCookie(COOKIE_NAME, {domain: DOMAIN, path: '/'});
-    return res.status(403).send('認証エラー：トークンが無効か期限切れです。'); 
+    return new Response('認証エラー：トークンが無効か期限切れです。', {status: 403});
   }
-
 };
 
-// 2. 認証チェック（他のサイトでも共通して使うロジック）
-app.get('/check-auth', authenticate, (req: any, res: any) => {
-  res.send(`認証済みです。UserID: ${req.user.userId}`);
+const server = serve({
+  port: PORT,
+  routes: {
+    "/login": {
+      async GET(req) {
+        return await login(req, async (is_login)=>{
+          if (is_login){
+            return new Response('ログイン完了！1日間有効なTokenをCookieに保存しました。');
+          } else {
+            return new Response('something wrong in login', {status: 500});
+          }
+        });
+      }
+    },
+    "/logout": {
+      async GET(req) {
+        req.cookies.delete(COOKIE_NAME);
+        return new Response('ログアウトしました。');
+      }
+    },
+    "/": {
+      async GET(req) {
+        return await authenticate(req, async (decoded)=>{
+          return new Response(`認証済みです。UserID: ${decoded.userId}`);
+        });
+      }
+    }
+  },
+
+  development: process.env.NODE_ENV !== "production" && {
+    // Enable browser hot reloading in development
+    hmr: true,
+
+    // Echo console logs from the browser to the server
+    console: true,
+  },
 });
 
-// 3. ログアウト
-app.get('/logout', (req: any, res: any) => {
-  res.clearCookie(COOKIE_NAME, { domain: DOMAIN, path: '/' });
-  res.send('ログアウトしました。');
-});
-
-app.listen(PORT, () => {
-  console.log(`SSO Auth Server running at http://localhost:${PORT}`);
-});
+console.log(`SSO Auth Server running at ${server.url}`);
